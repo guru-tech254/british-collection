@@ -846,7 +846,7 @@ function paintChat(){
  if(!m)return;
 
  m.innerHTML=!DB
- ?`<div class="mg">Sign in to claude.ai to chat in this prototype.</div>`
+ ?`<div class="mg">not available at the moment.</div>`
  :[{from:"a",text:"Hi! 👋 Ask us about sizes, delivery or your order. Please don’t share private details here."},...cm].map(x=>`<div class="mg ${x.from==="c"?"me":""}">${esc(x.text)}</div>`).join("");
 
  m.scrollTop=m.scrollHeight;
