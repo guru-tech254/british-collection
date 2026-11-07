@@ -43,8 +43,79 @@ app.post('/api/mpesa/stkpush',async(req,res)=>{
     if(!supabase) return res.status(503).json({error:'Order storage is not configured. Connect Supabase before accepting payments.'});
     if(!name||!email||!address||!Array.isArray(items)||!items.length) return res.status(400).json({error:'Missing required order details.'});
     const msisdn=normalizePhone(phone);
-    const catalog={1:7670,2:8320,3:16770,4:12870,5:3770,6:4420,7:8970,8:7020,9:3250,10:5070,11:2860,12:1820};
-    const safeItems=items.map(i=>{const unitPrice=catalog[Number(i.id)],quantity=Math.max(1,Math.min(20,Math.floor(Number(i.quantity)||1)));if(!unitPrice)throw new Error('A product in your cart is no longer available.');return {id:Number(i.id),name:String(i.name||'Product').slice(0,120),category:String(i.category||'').slice(0,60),size:String(i.size||'').slice(0,20),quantity,unitPrice};});
+    
+// GET CURRENT PRODUCTS FROM SUPABASE
+const productIds = [...new Set(
+  items.map(item => String(item.id || "").trim()).filter(Boolean)
+)];
+
+if (!productIds.length) {
+  throw new Error("Your cart contains invalid products. Please refresh and try again.");
+}
+
+const { data: products, error: productError } = await supabase
+  .from("products")
+  .select("id,name,price,stock,is_active")
+  .in("id", productIds);
+
+if (productError) {
+  console.error("Product validation error:", productError.message);
+  throw new Error("Could not verify your cart. Please try again.");
+}
+
+const productMap = new Map(
+  (products || []).map(product => [String(product.id), product])
+);
+
+// Validate stock and availability, including duplicate product lines.
+const requested = new Map();
+
+for (const item of items) {
+  const id = String(item.id || "").trim();
+  const quantity = Math.max(
+    1,
+    Math.min(20, Math.floor(Number(item.quantity) || 1))
+  );
+
+  requested.set(id, (requested.get(id) || 0) + quantity);
+}
+
+for (const [id, quantity] of requested) {
+  const product = productMap.get(id);
+
+  if (!product || product.is_active !== true) {
+    throw new Error("A product in your cart is no longer available. Please refresh the shop.");
+  }
+
+  if (Number(product.stock) < quantity) {
+    throw new Error(
+      `${product.name} has only ${Number(product.stock) || 0} item(s) available. Please update your cart.`
+    );
+  }
+
+  if (!(Number(product.price) > 0)) {
+    throw new Error(`${product.name} has an invalid price. Please contact us.`);
+  }
+}
+
+// Build trusted order items using the latest database prices.
+const safeItems = items.map(item => {
+  const id = String(item.id || "").trim();
+  const product = productMap.get(id);
+
+  return {
+    id,
+    name: String(product.name).slice(0, 120),
+    category: String(item.category || "").slice(0, 60),
+    size: String(item.size || "").slice(0, 20),
+    quantity: Math.max(
+      1,
+      Math.min(20, Math.floor(Number(item.quantity) || 1))
+    ),
+    unitPrice: Math.round(Number(product.price))
+  };
+});
+
     const subtotal=safeItems.reduce((sum,i)=>sum+i.unitPrice*i.quantity,0);
     const delivery=subtotal>=13000?0:350;
     const amount=subtotal+delivery;
